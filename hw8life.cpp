@@ -2,60 +2,43 @@
 #include<mpi.h>
 #include<stdlib.h>
 #include<fstream>
-#include<ctime>
+#include<time.h>
 #define MCW MPI_COMM_WORLD
-#define N 24
-#define I 67
+#define N 1024
+#define I 105
 
 using namespace std;
 
 int main(int argc, char **argv) {
 	int rank, size, num;
-	int world[N][N];
-	ofstream outfile("world.txt");
-//	srand(time(NULL));
-//	for(int i = 0; i < N; i++) {
-//		for(int j = 0; j < N; j++) {
-//			num = rand() % 5;
-//			if(num == 1) {world[i][j] = 1;}
-//			else {world[i][j] = 0;}
-//		}
-//	}
-	world[3][0] = 1; 
-	world[3][2] = 1;
-	world[4][1] = 1;
-	world[4][2] = 1;
-	world[5][1] = 1; 
-	for(int i = 0; i < N; i++) {
-		for(int j = 0; j < N; j++) {
-			if(world[i][j] == 0) {outfile << "o";}
-			else {outfile << "x";}
-		}
-		outfile << endl;
-	}
-	
-	MPI_Init(&argc, &argv);
-	MPI_Comm_rank(MCW, &rank);
-	MPI_Comm_size(MCW, &size);
-	int partSize = N/size;
-	int myWorld[partSize][N];
-	if(rank == 0) {
-		for(int dest = 0; dest < size; dest++) {
-			for(int row = 0; row < partSize; row++) {
-				for(int col = 0; col < N; col++) {
-					myWorld[row][col] = world[row+(dest*partSize)][col];				}
-			}
-			MPI_Send(&myWorld, N*partSize, MPI_INT, dest, 0, MCW);
-		}
-	}
-	
-	MPI_Recv(&myWorld, N*partSize, MPI_INT, 0, 0, MCW, MPI_STATUS_IGNORE);
+	double totalTime = 0; 
+	time_t startTime, endTime;
 	int sendBelow[N];
 	int fromAbove[N];
 	int sendAbove[N];
 	int fromBelow[N];
 
+	ofstream outfile("world.txt");
+	
+	MPI_Init(&argc, &argv);
+	MPI_Comm_rank(MCW, &rank);
+	MPI_Comm_size(MCW, &size);
+
+	srand(time(NULL));
+
+	int partSize = N/size;
+	int myWorld[partSize][N];
+	for(int row = 0; row < partSize; row++) {
+		for(int col = 0; col < N; col++) {
+			myWorld[row][col] = rand()%5==1 ? 1:0;
+		}
+	}
+
+	
 	for(int i = 0; i < I; i++) {
+		if(rank == 0) {
+			startTime = time(0);
+		}
 		if(rank < size-1) {
 			for(int col = 0; col < N; col++) {
 				sendBelow[col] = myWorld[partSize-1][col];
@@ -63,13 +46,7 @@ int main(int argc, char **argv) {
 			MPI_Send(&sendBelow, N, MPI_INT, rank+1, 1, MCW);
 		}
 		if(rank > 0) {
-			MPI_Recv(&fromAbove, N, MPI_INT, rank-1, 1, MCW, MPI_STATUS_IGNORE);
-			if(rank == 6) {
-			for(int k = 0; k < N; k++) {
-				cout<<fromAbove[k];
-			}
-			cout<<endl;
-			}
+			MPI_Recv(&fromAbove, N, MPI_INT, rank-1, 1, MCW, MPI_STATUS_IGNORE);			
 		}
 		else {
 			for(int col = 0; col < N; col++) {
@@ -126,7 +103,6 @@ int main(int argc, char **argv) {
 							+myWorld[x+1][y+1]+myWorld[x+1][y]+myWorld[x+1][y-1];
 					}
 				}
-				if(rank == 0 && x == 5 && y == 1) {cout<<"sum for 5,1: "<<sum<<endl;}
 				if(myWorld[x][y]==1 && (sum==0 || sum==1 || sum>=4)) {tempWorld[x][y] = 0;}
 				else if(myWorld[x][y]==1 && (sum==2 || sum==3)) {tempWorld[x][y] = 1;}
 				else if(myWorld[x][y]==0 && sum==3) {tempWorld[x][y] = 1;} 
@@ -138,9 +114,16 @@ int main(int argc, char **argv) {
 				myWorld[row][col] = tempWorld[row][col];
 			}
 		}
+
+		if(rank == 0) {
+			endTime = time(0);
+			double timeDiff = difftime(endTime, startTime) * 1000.0;
+			cout<<"Time for Day "<<i+1<<": "<<timeDiff<<endl;
+			totalTime += timeDiff;
+		}
 		if(rank == 0) {
 			int oneBoard[partSize][N];
-			outfile << "After "<<i+1<<" Iterations" << endl;
+			outfile << "After "<<i+1<<" Days" << endl;
 			for(int row = 0; row < partSize; row++) {
 				for(int col = 0; col < N; col++) {
 					if(myWorld[row][col] == 0) {outfile << "o";}
@@ -163,6 +146,9 @@ int main(int argc, char **argv) {
 			MPI_Send(&myWorld, N*partSize, MPI_INT, 0, 3, MCW);
 		}
 	}
+
+	cout<<"Total Time: "<<totalTime<<endl;
+	cout<<"Average Day Timing: "<<totalTime/I<<endl;
 	
 	outfile.close();
 	MPI_Finalize();
