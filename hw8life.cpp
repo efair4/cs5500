@@ -21,11 +21,11 @@ int main(int argc, char **argv) {
 //			else {world[i][j] = 0;}
 //		}
 //	}
-	world[0][0] = 1; 
-	world[0][2] = 1;
-	world[1][1] = 1;
-	world[1][2] = 1;
-	world[2][1] = 1; 
+	world[3][0] = 1; 
+	world[3][2] = 1;
+	world[4][1] = 1;
+	world[4][2] = 1;
+	world[5][1] = 1; 
 	for(int i = 0; i < N; i++) {
 		for(int j = 0; j < N; j++) {
 			if(world[i][j] == 0) {outfile << "o";}
@@ -64,6 +64,12 @@ int main(int argc, char **argv) {
 		}
 		if(rank > 0) {
 			MPI_Recv(&fromAbove, N, MPI_INT, rank-1, 1, MCW, MPI_STATUS_IGNORE);
+			if(rank == 6) {
+			for(int k = 0; k < N; k++) {
+				cout<<fromAbove[k];
+			}
+			cout<<endl;
+			}
 		}
 		else {
 			for(int col = 0; col < N; col++) {
@@ -74,10 +80,10 @@ int main(int argc, char **argv) {
 			for(int col = 0; col < N; col++) {
 				sendAbove[col] = myWorld[0][col];
 			}
-			MPI_Send(&sendAbove, N, MPI_INT, rank-1, 1, MCW);
+			MPI_Send(&sendAbove, N, MPI_INT, rank-1, 2, MCW);
 		}
 		if(rank < size-1) {
-			MPI_Recv(&fromBelow, N, MPI_INT, rank+1, 1, MCW, MPI_STATUS_IGNORE);
+			MPI_Recv(&fromBelow, N, MPI_INT, rank+1, 2, MCW, MPI_STATUS_IGNORE);
 		}
 		else {
 			for(int col = 0; col < N; col++) {
@@ -94,10 +100,10 @@ int main(int argc, char **argv) {
 				else if(x==0 && y==N-1) { //top right
 					sum = myWorld[x][y-1]+myWorld[x+1][y-1]+myWorld[x+1][y]+fromAbove[N-1]+fromAbove[N-2];;
 				}
-				else if(x==N-1 && y ==0) { //bottom left
+				else if(x==partSize-1 && y ==0) { //bottom left
 					sum = myWorld[x-1][y]+myWorld[x-1][y+1]+myWorld[x][y+1]+fromBelow[0]+fromBelow[1];
 				}
-				else if(x==N-1 && y==N-1) { //bottom right
+				else if(x==partSize-1 && y==N-1) { //bottom right
 					sum = myWorld[x][y-1]+myWorld[x-1][y-1]+myWorld[x-1][y]+fromBelow[N-1]+fromBelow[N-2];
 				}
 				else {
@@ -111,7 +117,7 @@ int main(int argc, char **argv) {
 					else if(y==N-1) { //right column
 						sum = myWorld[x-1][y]+myWorld[x-1][y-1]+myWorld[x][y-1]+myWorld[x+1][y-1]+myWorld[x+1][y];
 					}
-					else if(x==N-1) { //bottom row
+					else if(x==partSize-1) { //bottom row
 						sum = myWorld[x][y-1]+myWorld[x-1][y-1]+myWorld[x-1][y]+myWorld[x-1][y+1]+myWorld[x][y+1]
 							+fromBelow[y-1]+fromBelow[y]+fromBelow[y+1];
 					}
@@ -120,6 +126,7 @@ int main(int argc, char **argv) {
 							+myWorld[x+1][y+1]+myWorld[x+1][y]+myWorld[x+1][y-1];
 					}
 				}
+				if(rank == 0 && x == 5 && y == 1) {cout<<"sum for 5,1: "<<sum<<endl;}
 				if(myWorld[x][y]==1 && (sum==0 || sum==1 || sum>=4)) {tempWorld[x][y] = 0;}
 				else if(myWorld[x][y]==1 && (sum==2 || sum==3)) {tempWorld[x][y] = 1;}
 				else if(myWorld[x][y]==0 && sum==3) {tempWorld[x][y] = 1;} 
@@ -142,7 +149,7 @@ int main(int argc, char **argv) {
 				outfile << endl;
 			}
 			for(int src = 1; src < size; src++) {
-				MPI_Recv(&oneBoard, N*partSize, MPI_INT, src, 2, MCW, MPI_STATUS_IGNORE);
+				MPI_Recv(&oneBoard, N*partSize, MPI_INT, src, 3, MCW, MPI_STATUS_IGNORE);
 				for(int row = 0; row < partSize; row++) {
 					for(int col = 0; col < N; col++) {
 						if(oneBoard[row][col] == 0) {outfile << "o";}
@@ -153,7 +160,7 @@ int main(int argc, char **argv) {
 			}
 		}
 		else {
-			MPI_Send(&myWorld, N*partSize, MPI_INT, 0, 2, MCW);
+			MPI_Send(&myWorld, N*partSize, MPI_INT, 0, 3, MCW);
 		}
 	}
 	
