@@ -2,17 +2,18 @@
 #include<mpi.h>
 #include<stdlib.h>
 #include<fstream>
-#include<time.h>
+#include<chrono>
 #define MCW MPI_COMM_WORLD
-#define N 1024
-#define I 105
+#define N 24
+#define I 50
 
 using namespace std;
 
 int main(int argc, char **argv) {
-	int rank, size, num;
+	int rank, size;
 	double totalTime = 0; 
-	time_t startTime, endTime;
+	auto startTime = std::chrono::system_clock::now();
+	auto endTime = std::chrono::system_clock::now();
 	int sendBelow[N];
 	int fromAbove[N];
 	int sendAbove[N];
@@ -23,7 +24,9 @@ int main(int argc, char **argv) {
 	MPI_Init(&argc, &argv);
 	MPI_Comm_rank(MCW, &rank);
 	MPI_Comm_size(MCW, &size);
-
+	if(rank == 0) {
+		cout<<"Timing for "<<size<<" Processors"<<endl;
+	}
 	srand(time(NULL));
 
 	int partSize = N/size;
@@ -33,11 +36,10 @@ int main(int argc, char **argv) {
 			myWorld[row][col] = rand()%5==1 ? 1:0;
 		}
 	}
-
 	
 	for(int i = 0; i < I; i++) {
 		if(rank == 0) {
-			startTime = time(0);
+			startTime = std::chrono::system_clock::now();
 		}
 		if(rank < size-1) {
 			for(int col = 0; col < N; col++) {
@@ -103,24 +105,21 @@ int main(int argc, char **argv) {
 							+myWorld[x+1][y+1]+myWorld[x+1][y]+myWorld[x+1][y-1];
 					}
 				}
+				//Calculate new value
 				if(myWorld[x][y]==1 && (sum==0 || sum==1 || sum>=4)) {tempWorld[x][y] = 0;}
 				else if(myWorld[x][y]==1 && (sum==2 || sum==3)) {tempWorld[x][y] = 1;}
 				else if(myWorld[x][y]==0 && sum==3) {tempWorld[x][y] = 1;} 
 				else {tempWorld[x][y] = 0;}
 			}
 		}
+		//Copy new values into myWorld
 		for(int row = 0; row < partSize; row++) {
 			for(int col = 0; col < N; col++) {
 				myWorld[row][col] = tempWorld[row][col];
 			}
 		}
 
-		if(rank == 0) {
-			endTime = time(0);
-			double timeDiff = difftime(endTime, startTime) * 1000.0;
-			cout<<"Time for Day "<<i+1<<": "<<timeDiff<<endl;
-			totalTime += timeDiff;
-		}
+		//Print out the updated world
 		if(rank == 0) {
 			int oneBoard[partSize][N];
 			outfile << "After "<<i+1<<" Days" << endl;
@@ -138,17 +137,28 @@ int main(int argc, char **argv) {
 						if(oneBoard[row][col] == 0) {outfile << "o";}
 						else {outfile << "X";}
 					}
-					outfile << endl;
+				outfile << endl;
 				}
 			}
 		}
 		else {
 			MPI_Send(&myWorld, N*partSize, MPI_INT, 0, 3, MCW);
 		}
+
+		//Get the timing information
+		if(rank == 0) {
+			endTime = std::chrono::system_clock::now();
+			auto timeDiff = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+			cout<<"Time for Day "<<i+1<<": "<<timeDiff.count()<<" milliseconds"<<endl;
+			totalTime += timeDiff.count();
+		}
+
 	}
 
-	cout<<"Total Time: "<<totalTime<<endl;
-	cout<<"Average Day Timing: "<<totalTime/I<<endl;
+	if(rank == 0) {
+		cout<<"Total Time: "<<totalTime<<" milliseconds"<<endl;
+		cout<<"Average Day Timing: "<<totalTime/I<<" milliseconds"<<endl;
+	}
 	
 	outfile.close();
 	MPI_Finalize();
