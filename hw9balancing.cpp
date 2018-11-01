@@ -40,19 +40,21 @@ int main(int argc, char **argv) {
 	if(rank == 0) {
 		hasToken = true;
 		int job = rand() % 3 + 1;
+		tasksCreated++;
 		MPI_Send(&job, 1, MPI_INT, rand() % 4, JOB, MCW);
 	}
 
 	while(1) {
 		MPI_Iprobe(ANY, JOB, MCW, &jobFlag, &status);
-	//	if(!jobFlag) break;//not sure on this. Why is probe needed?
-		MPI_Irecv(&newTask, 1, MPI_INT, ANY, JOB, MCW, &request);
+		if(jobFlag) {
+			MPI_Irecv(&newTask, 1, MPI_INT, ANY, JOB, MCW, &request);
+			myTasks.push(newTask);
+		}
 		if(jobFlag && newTask == -1) {
 			MPI_Send(&tasksCreated, 1, MPI_INT, 0, CREATED, MCW);
 			MPI_Send(&tasksCompleted, 1, MPI_INT, 0, COMPLETED, MCW);
 			break;
 		}
-		myTasks.push(newTask);
 		if(myTasks.size() > 16) {
 			for(int i = 0; i < 2; i++) {
 				int task = myTasks.front();
@@ -63,24 +65,25 @@ int main(int argc, char **argv) {
 				MPI_Send(&task, 1, MPI_INT, dest, JOB, MCW);
 			}
 		}
-		else if(!myTasks.empty()) {
+		if(!myTasks.empty()) {
 			int num = myTasks.front();
 			myTasks.pop();
-			cout<<"Rank "<<rank<<" is sleeping for "<<num/10<<" seconds "<<
-			"and has "<<myTasks.size()<<" tasks in the queue"<<endl;
-			sleep(num/10);
+			sleep(static_cast<double>(num)/5);
 			tasksCompleted++;
 		}
-		else if(tasksCreated < taskLimit) {
+		if(tasksCreated < taskLimit) {
 			for(int i = 0; i < rand() % 3 + 1; i++) {
 				myTasks.push(rand() % 3 + 1);
 				tasksCreated++;
 			}
 		}
-		else if(myTasks.empty()) {
+		if(myTasks.empty()) {
 			if(hasToken) {
+				cout<<"Rank: "<<rank<<", token: "<<(tokenColor==BLACK ? "Black" : "White")<<endl;
 				int dest = rank + 1 < size ? rank + 1 : 0;
+				if(rank == 0) {tokenColor = WHITE;}
 				MPI_Send(&tokenColor, 1, MPI_INT, dest, TOKEN, MCW);
+				hasToken = false;
 				myColor = WHITE;
 			}
 			else {
@@ -88,6 +91,7 @@ int main(int argc, char **argv) {
 				MPI_Iprobe(src, TOKEN, MCW, &tokenFlag, &status);
 				if(tokenFlag) {
 					MPI_Irecv(&tokenColor, 1, MPI_INT, src, TOKEN, MCW, &request);
+					hasToken = true;
 					if(rank == 0 && tokenColor == WHITE) {
 						int globalStop = -1;
 						for(int i = 1; i < size; i++) {
