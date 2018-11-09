@@ -2,8 +2,12 @@
 #include <fstream>
 #include <string>
 #include <cmath>
+#include <ctime>
 #include <stdlib.h>
 #include <mpi.h>
+#include <vector>
+#define MCW MPI_COMM_WORLD
+#define NUMGENOMES 250
 
 using namespace std;
 
@@ -17,38 +21,39 @@ struct Genome{
 	long fitness;
 };
 
-void read100(City city[100]){
+void read100(City cities[100]){
 	ifstream infile;
 	infile.open("tsinput.txt");
 	if(!infile) {cout<<"Error opening file"<<endl;return;}
 	for(int i=0;i<100;++i){
-		infile>>city[i].x>>city[i].y;
+		infile>>cities[i].x>>cities[i].y;
   }
 }
 
-void setFitness(Genome &g, City city[100]){
+void setFitness(Genome &g, City cities[100]){
   long ydist; long xdist;
   g.fitness=0;
   for(int j=0;j<99;++j){
-	  ydist = city[g.c[j]].y - city[g.c[j+1]].y;
-	  xdist = city[g.c[j]].x - city[g.c[j+1]].x;
-	  g.fitness += sqrt(ydist*ydist+xdist*xdist);
+	  ydist = cities[g.c[j]].y - cities[g.c[j+1]].y;
+	  xdist = cities[g.c[j]].x - cities[g.c[j+1]].x;
+		long root = sqrt(ydist*ydist+xdist*xdist);
+	  g.fitness += root; 
 	}
 }
 
-void setupGenome(Genome g[1000], City city[100]){
-	for(int i=0;i<1000;++i){
+void setupGenome(Genome g[NUMGENOMES], City cities[100]){
+	for(int i=0;i<NUMGENOMES;++i){
 	  for(int j=0;j<100;++j){
 	    g[i].c[j]=j;
 	  }
-	  for(int j=0;j<1000;++j){
+	  for(int j=0;j<NUMGENOMES;++j){
 	    int a; int b; int t;
 		  a=rand()%100; b=rand()%100;
 		  t=g[i].c[a];
 		  g[i].c[a]=g[i].c[b];
 		  g[i].c[b]=t;
-		}
-		setFitness(g[i],city);
+		}	
+		setFitness(g[i],cities);
 	}
 }
 
@@ -76,55 +81,85 @@ void mutate(Genome &g1){
   }																	    
 }
 
-long bestFitness(Genome g[1000]){
+long bestFitness(Genome g[NUMGENOMES]){
   long bf;
   bf=g[0].fitness;
-  for(int i=0;i<1000;++i){
+  for(int i=0;i<NUMGENOMES;++i){
     if(g[i].fitness<bf)bf=g[i].fitness;
   }
   return bf;															    
 }
 
-void mateAndSelect(Genome &g1, Genome &g2, City city[100]){
+void mateAndSelect(Genome &g1, Genome &g2, City cities[100]){
   Genome ng1,ng2;
   ng1 = g1;
   ng2 = g2;
   pmx(ng1,ng2);
   if(rand()%200==42) mutate(ng1);
   if(rand()%200==42) mutate(ng2);
-  setFitness(ng1, city);
-  setFitness(ng2, city);
+  setFitness(ng1, cities);
+  setFitness(ng2, cities);
   if(ng1.fitness<g1.fitness)g1=ng1;
   if(ng2.fitness<g2.fitness)g2=ng2;																			    
 }
 
-int main(){  
-	City city[100];
-	Genome g[1000];
+int main(int argc, char **argv){  
+	int rank, size;
+	vector<int> fitnessVec;
+	City cities[100];
+	Genome g[NUMGENOMES];
 	int mate;
 	long oldbf=-1;
 	long bf;
 	
-	read100(city);
-	setupGenome(g,city);
+	read100(cities);
+
+	MPI_Init(&argc, &argv);
+	MPI_Comm_rank(MCW, &rank);
+	MPI_Comm_size(MCW, &size);
+	srand(time(NULL)+rank);
+	setupGenome(g,cities);
 	int count = 0;
-	while(count < 48){
-	  for(int i=0;i<1000;++i){
-	    mate=rand()%1000;
-	    mateAndSelect(g[i],g[mate],city);
+	while(count < 24){
+	  for(int i=0;i<NUMGENOMES;++i){
+	    mate=rand()%NUMGENOMES;
+	    mateAndSelect(g[i],g[mate],cities);
 	  }
 		bf=bestFitness(g);
 		if(oldbf==-1){
-		  cout<<bf<<endl;
 			oldbf = bf;
+			fitnessVec.push_back(oldbf);
 		}
 		else{
 		  if(bf<oldbf){
-		    oldbf=bf;
-		    cout<<bf<<endl;
+				oldbf=bf;
+				fitnessVec.push_back(bf);
 		  }
 		}
 		count++;
 	}
+	if(rank == 0) {
+		for(int i = 0; i < fitnessVec.size(); i++) {
+			cout<<"Rank "<<rank<<" Best fitness: "<<fitnessVec[i]<<endl;
+		}
+		cout<<endl;
+		int vecSize;
+		for(int i = 1; i < size; i++) {
+			MPI_Recv(&vecSize, 1, MPI_INT, i, 0, MCW, MPI_STATUS_IGNORE);
+			int incomingArr[vecSize];
+			MPI_Recv(&incomingArr[0], vecSize, MPI_INT, i, 1, MCW, MPI_STATUS_IGNORE);
+			for(int j = 0; j < vecSize; j++) {
+				cout<<"Rank "<<i<<" Best fitness: "<<incomingArr[j]<<endl;
+			}
+			cout<<endl;
+		}
+	}
+	else {
+		int myVecSize = fitnessVec.size();
+		MPI_Send(&myVecSize, 1, MPI_INT, 0, 0, MCW);
+		MPI_Send(&fitnessVec[0], myVecSize, MPI_INT, 0, 1, MCW);
+	}
+
+	MPI_Finalize();
 	return 0;
 }
