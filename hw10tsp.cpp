@@ -105,22 +105,44 @@ void mateAndSelect(Genome &g1, Genome &g2, City cities[100]){
 
 int main(int argc, char **argv){  
 	int rank, size;
+	int flag;
 	vector<int> fitnessVec;
 	City cities[100];
 	Genome g[NUMGENOMES];
 	int mate;
 	long oldbf=-1;
 	long bf;
+	MPI_Status status;
 	
 	read100(cities);
 
 	MPI_Init(&argc, &argv);
+
+	const int nitems=2;
+  int blocklengths[2] = {100,1};
+	MPI_Datatype types[2] = {MPI_INT, MPI_INT};
+	MPI_Datatype mpi_genome_type;
+	MPI_Aint offsets[2];
+
+	offsets[0] = offsetof(Genome, c);
+	offsets[1] = offsetof(Genome, fitness);
+  MPI_Type_create_struct(nitems, blocklengths, offsets, types, &mpi_genome_type);
+  MPI_Type_commit(&mpi_genome_type);
+
 	MPI_Comm_rank(MCW, &rank);
 	MPI_Comm_size(MCW, &size);
 	srand(time(NULL)+rank);
 	setupGenome(g,cities);
 	int count = 0;
 	while(count < 24){
+		MPI_Iprobe(MPI_ANY_SOURCE, 3, MCW, &flag, &status);
+		if(flag) {
+			Genome newGenomes[10];
+			MPI_Recv(&newGenomes[0], 10, mpi_genome_type, status.MPI_SOURCE, 3, MCW, MPI_STATUS_IGNORE);
+			for(int i = 0; i < 10; i++) {
+				g[i] = newGenomes[i];
+			}
+		}
 	  for(int i=0;i<NUMGENOMES;++i){
 	    mate=rand()%NUMGENOMES;
 	    mateAndSelect(g[i],g[mate],cities);
@@ -136,6 +158,11 @@ int main(int argc, char **argv){
 				fitnessVec.push_back(bf);
 		  }
 		}
+
+		if(count%14 == 0) {
+			MPI_Send(&g[0], 10, mpi_genome_type, rand()%size, 3, MCW);
+		}
+
 		count++;
 	}
 	if(rank == 0) {
@@ -155,6 +182,7 @@ int main(int argc, char **argv){
 		}
 	}
 	else {
+		cout<<"here"<<endl;
 		int myVecSize = fitnessVec.size();
 		MPI_Send(&myVecSize, 1, MPI_INT, 0, 0, MCW);
 		MPI_Send(&fitnessVec[0], myVecSize, MPI_INT, 0, 1, MCW);
