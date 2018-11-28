@@ -2,8 +2,10 @@
 #include<mpi.h>
 #include<stdlib.h>
 #include<vector>
-#include <algorithm>
-#include <random>
+#include<algorithm>
+#include<random>
+#include<ctime>
+#include<numeric>
 
 #define MCW MPI_COMM_WORLD
 #define white 0
@@ -13,6 +15,7 @@
 #define orange 4
 #define yellow 5
 #define CUBESIZE 48
+#define NUMALGOS 8
 
 using namespace std;
 
@@ -42,12 +45,53 @@ void printColor(int color) {
 	}
 }
 
+void printSol(int sol[NUMALGOS]) {
+	for (int i = 0; i < NUMALGOS; i++) {
+		switch (sol[i]) {
+		case 0: cout << "r, "; break;
+		case 1: cout << "l, "; break;
+		case 2: cout << "u, "; break;
+		case 3: cout << "d, "; break;
+		case 4: cout << "f, "; break;
+		case 5: cout << "b, "; break;
+		case 6: cout << "ri, "; break;
+		case 7: cout << "li, "; break;
+		//case 2: cout << "l" << endl; break;
+		//case 3: cout << "li" << endl; break;
+		//case 4: cout << "u" << endl; break;
+		//case 5: cout << "ui" << endl; break;
+		//case 6: cout << "d" << endl; break;
+		//case 7: cout << "di" << endl; break;
+		//case 8: cout << "f" << endl; break;
+		//case 9: cout << "fi" << endl; break;
+		//case 10: cout << "b" << endl; break;
+		//case 11: cout << "bi" << endl; break;
+		}
+	}
+	cout << endl;
+}
+
+void doAlgo(vector<vector<int>> &cube, int algoNum) {
+	switch (algoNum) {
+	case 0: r(cube); break;
+	case 1: l(cube); break;
+	case 2: u(cube); break;
+	case 3: d(cube); break;
+	case 4: f(cube); break;
+	case 5: b(cube); break;
+	case 6: ri(cube); break;
+	case 7: li(cube); break;
+	//case 8: ui(cube); break;
+	//case 9: di(cube); break;
+	//case 10: fi(cube); break;
+	//case 11: bi(cube); break;
+	}
+}
+
 void setupCube(vector<vector<int>> &cube) {
 	int currentColor = white;
 	int startIndex = 0;
 	while (currentColor <= yellow) {
-		cout << startIndex << endl;
-		printColor(currentColor);
 		for (int i = startIndex; i < startIndex + 8; i++) {
 			cube[currentColor].push_back(i);
 		}
@@ -56,25 +100,112 @@ void setupCube(vector<vector<int>> &cube) {
 	}
 }
 
+void mixCube(vector<vector<int>> &cube) {
+	int numArray[NUMALGOS] = { 0,1,2,3,4,5,6,7 };// , 8, 9, 10, 11
+	auto eng = default_random_engine(time(NULL));
+	shuffle(begin(numArray), end(numArray), eng);
+	printSol(numArray);
+	for (int i = 0; i < NUMALGOS; i++) {
+		doAlgo(cube, numArray[i]);
+	}
+	cout << endl;
+}
+
+int doPermutations(vector<vector<int>> startCube, vector<vector<int>> mixedCube, int startNum, vector<int> &list) {
+	int cnt = 1;
+	do {
+		vector<vector<int>> copy = startCube;
+		doAlgo(copy, startNum);
+		for (int i = 0; i < NUMALGOS - 1; i++) {
+			doAlgo(copy, list[i]);
+		}
+		if (copy == mixedCube) {
+			cout << "Start Number = " << startNum << ", Permutation " << cnt << endl;
+			for (int i = 0; i < 6; i++) {
+				for (int j = 0; j < 8; j++) {
+					cout << mixedCube[i][j] << ", ";
+				}
+			}
+			cout << endl;
+			list.insert(list.begin(), startNum);
+			return 1;
+		}
+		cnt++;
+	} while (next_permutation(list.begin(), list.end()));
+	return 0;
+}
+
 
 int main(int argc, char **argv) {
 	int rank, size;
 	vector<vector<int>> startCube(6);
 	setupCube(startCube);
 	vector<vector<int>> mixedCube = startCube;
-	//auto rng = std::default_random_engine{};
-	//shuffle(begin(mixedCube), end(mixedCube), rng);
-	int count = 0;
-	do {
-		bi(mixedCube);
-		count++;
-	} while (startCube != mixedCube);
-	cout << endl << count << endl;
-
+	mixCube(mixedCube);
+	MPI_Status status;
+	MPI_Request request;
+	
 	MPI_Init(&argc, &argv);
 	MPI_Comm_rank(MCW, &rank);
 	MPI_Comm_size(MCW, &size);
 
+	if (rank == 0) {
+		cout << "Shuffled Cube" << endl;
+		for (int i = 0; i < 6; i++) {
+			for (int j = 0; j < 8; j++) {
+				cout << mixedCube[i][j] << ", ";
+			}
+		}
+		cout << endl;
+
+		int currentAlgo = 0;
+		for (int i = 1; i < size; i++) { //Send out initial start algorithm
+			MPI_Send(&currentAlgo, 1, MPI_INT, i, 0, MCW);
+			currentAlgo++;
+		}
+		int solFound = 0;
+		int solution[NUMALGOS];
+		while (!solFound) {
+			MPI_Recv(&solFound, 1, MPI_INT, MPI_ANY_SOURCE, 1, MCW, &status);
+			if (solFound) {
+				MPI_Recv(&solution[0], NUMALGOS, MPI_INT, status.MPI_SOURCE, 2, MCW, MPI_STATUS_IGNORE);
+				printSol(solution);
+				//MPI_Bcast(&solFound, 1, MPI_INT, 0, MCW);
+				for (int i = 1; i < size; i++) { //Send out stop signal
+					int stopSignal = -1;
+					MPI_Send(&stopSignal, 1, MPI_INT, i, 0, MCW);
+				}
+			}
+			else if(currentAlgo < NUMALGOS) {
+				MPI_Send(&currentAlgo, 1, MPI_INT, status.MPI_SOURCE, 0, MCW);
+				currentAlgo++;
+			}
+		}
+	}
+	else {
+		int solFound = 0;
+		int startNum;
+		while (1) {
+			vector<int> numList(NUMALGOS);
+			iota(numList.begin(), numList.end(), 0);
+			MPI_Recv(&startNum, 1, MPI_INT, 0, 0, MCW, MPI_STATUS_IGNORE);
+			if (startNum == -1) {
+				break;
+			}
+
+			numList.erase(remove(numList.begin(), numList.end(), startNum), numList.end());
+			solFound = doPermutations(startCube, mixedCube, startNum, numList);
+			MPI_Send(&solFound, 1, MPI_INT, 0, 1, MCW);
+			if (solFound) {
+				cout << "Rank " << rank << " found a solution!" << endl;
+				MPI_Send(&numList[0], NUMALGOS, MPI_INT, 0, 2, MCW);
+			}
+			else {
+				cout << "Rank " << rank << " tried with start=" << startNum << endl;
+			}
+			//MPI_Ibcast(&solFound, 1, MPI_INT, 0, MCW, &request);
+		}
+	}
 
 	MPI_Finalize();
 	return 0;
