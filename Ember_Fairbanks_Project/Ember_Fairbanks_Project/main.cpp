@@ -17,6 +17,7 @@
 #define yellow 5
 #define CUBESIZE 48
 #define NUMROTATIONS 7
+#define NUMPERMS 100
 
 using namespace std;
 
@@ -101,10 +102,10 @@ void setupCube(vector<vector<int>> &cube) {
 }
 
 void mixCube(vector<vector<int>> &cube, int rank) {
-	int numArray[NUMROTATIONS]; 
-	for (int i = 0; i < NUMROTATIONS; i++) { numArray[i] = i; }
-	auto eng = default_random_engine(time(NULL));
-	shuffle(begin(numArray), end(numArray), eng);
+	int numArray[NUMROTATIONS] = { 6,5,1,3,0,2,4 };
+	//for (int i = 0; i < NUMROTATIONS; i++) { numArray[i] = i; }
+	//auto eng = default_random_engine(time(NULL));
+	//shuffle(begin(numArray), end(numArray), eng);
 	for (int i = 0; i < NUMROTATIONS; i++) {
 		doRotation(cube, numArray[i]);
 	}
@@ -114,7 +115,7 @@ void mixCube(vector<vector<int>> &cube, int rank) {
 	}
 }
 
-ReturnValue doPermutations(vector<vector<int>> startCube, vector<vector<int>> mixedCube, int perms[500][NUMROTATIONS], int arrSize) {
+ReturnValue doPermutations(vector<vector<int>> startCube, vector<vector<int>> mixedCube, int perms[NUMPERMS][NUMROTATIONS], int arrSize) {
 	int flag;
 	MPI_Status status;
 	ReturnValue ret;
@@ -158,95 +159,142 @@ int main(int argc, char **argv) {
 	}
 	mixedCube = startCube;
 	mixCube(mixedCube, rank);
-	if (rank == 0) {
-		startTime = chrono::system_clock::now();
-		vector<int> numVec;
-		for (int i = 0; i < NUMROTATIONS; i++) { numVec.push_back(i); }
-		for (int i = 1; i < size; i++) { //Send out initial list of permutations
-			int permutations[500][NUMROTATIONS];
-			int arrSize = 500;
-			for (int j = 0; j < 500; j++) {
-				if (next_permutation(numVec.begin(), numVec.end())) {
-					for (int k = 0; k < 5; k++) {
-						permutations[j][k] = numVec[k];
-					}
-				}
-				else {
-					arrSize = j;
-					break;
-				}
-			}
-			MPI_Send(&arrSize, 1, MPI_INT, i, 3, MCW);
-			MPI_Send(&permutations[0], arrSize * NUMROTATIONS, MPI_INT, i, 0, MCW);
-		}
-		auto midTime = chrono::system_clock::now();
-		diff = chrono::duration_cast<chrono::milliseconds>(midTime - startTime);
-		cout << "Mid time: " << diff.count() << endl;
-		int solFound = 0;
-		bool morePerms = true;
-		int solution[NUMROTATIONS];
-		while (!solFound) {
-			MPI_Recv(&solFound, 1, MPI_INT, MPI_ANY_SOURCE, 1, MCW, &status);
-			if (solFound) {
-				MPI_Recv(&solution[0], NUMROTATIONS, MPI_INT, status.MPI_SOURCE, 2, MCW, MPI_STATUS_IGNORE);
-				cout << "Sol Permutation: ";
-				printSol(solution);
 
-				for (int i = 1; i < size; i++) { //Send out stop signal
-					int stopSignal = -1;
-					MPI_Send(&stopSignal, 1, MPI_INT, i, 4, MCW);
-					MPI_Send(&stopSignal, 1, MPI_INT, i, 3, MCW);
+	vector<int> numVec;
+	for (int i = 0; i < NUMROTATIONS; i++) { numVec.push_back(i); }
+	int flag;
+	vector<vector<int>> copy;
+	while (1) {
+		MPI_Iprobe(MPI_ANY_SOURCE, 0, MCW, &flag, &status);
+		if (flag) {
+			break;
+		}
+		cout << "here" << endl;
+		for (int i = 0; i < size; i++) {
+			if ((next_permutation(numVec.begin(), numVec.end())) && (i-rank == 0)) {
+				cout << rank << ": " << i << endl;
+				copy = startCube;
+				for (int j = 0; j < NUMROTATIONS; j++) {
+					cout << numVec[j] << ", ";
+					doRotation(copy, numVec[j]);
 				}
-				endTime = chrono::system_clock::now();
-				diff = chrono::duration_cast<chrono::milliseconds>(endTime - startTime);
-				cout << "Time:" << diff.count() << " milliseconds" << endl;
-			}
-			else if (morePerms) {
-				int permutations[500][NUMROTATIONS];
-				int arrSize = 500;
-				for (int j = 0; j < 500; j++) {
-					if (next_permutation(numVec.begin(), numVec.end())) {
-						for (int k = 0; k < NUMROTATIONS; k++) {
-							permutations[j][k] = numVec[k];
-						}
+				cout << endl;
+				if (copy == mixedCube) {
+					cout << "Rank " << rank << " found a solution!" << endl;
+					for (int k = 0; k < NUMROTATIONS; k++) {
+						cout<<numVec[k]<<", ";
 					}
-					else {
-						morePerms = false;
-						arrSize = j;
-						break;
+					cout << endl;
+					int stop = -1;
+					for (int s = 0; s < size; s++) {
+						MPI_Send(&stop, 1, MPI_INT, s, 0, MCW);
 					}
 				}
-				MPI_Send(&arrSize, 1, MPI_INT, status.MPI_SOURCE, 3, MCW);
-				MPI_Send(&permutations[0], arrSize * NUMROTATIONS, MPI_INT, status.MPI_SOURCE, 0, MCW);
 			}
 		}
 	}
-	else {
-		int solFound = 0;
-		ReturnValue retVal;
-		int flag;
-		int permutations[500][NUMROTATIONS];
-		int arrSize;
-		while (1) {
-			MPI_Iprobe(0, 4, MCW, &flag, &status);
-			if (flag) {
-				break;
-			}
-			MPI_Recv(&arrSize, 1, MPI_INT, 0, 3, MCW, MPI_STATUS_IGNORE);
-			MPI_Recv(&permutations[0], arrSize * NUMROTATIONS, MPI_INT, 0, 0, MCW, MPI_STATUS_IGNORE);
 
-			retVal = doPermutations(startCube, mixedCube, permutations, arrSize);
-			if (retVal.solFound == -1) {
-				break;
-			}
-			MPI_Send(&retVal.solFound, 1, MPI_INT, 0, 1, MCW);
-			if (retVal.solFound) {
-				cout << "Rank " << rank << " found a solution!" << endl;
-				MPI_Send(&permutations[retVal.solPos][0], NUMROTATIONS, MPI_INT, 0, 2, MCW);
-				break;
-			}
-		}
-	}
+
+	//int activeWorkers = size - 1;
+	//if (rank == 0) {
+	//	startTime = chrono::system_clock::now();
+	//	vector<int> numVec;
+	//	for (int i = 0; i < NUMROTATIONS; i++) { numVec.push_back(i); }
+	//	for (int i = 1; i < size; i++) { //Send out initial list of permutations
+	//		int permutations[NUMPERMS][NUMROTATIONS];
+	//		int arrSize = NUMPERMS;
+	//		for (int j = 0; j < NUMPERMS; j++) {
+	//			if (next_permutation(numVec.begin(), numVec.end())) {
+	//				for (int k = 0; k < NUMROTATIONS; k++) {
+	//					permutations[j][k] = numVec[k];
+	//				}
+	//			}
+	//			else {
+	//				arrSize = j;
+	//				break;
+	//			}
+	//		}
+	//		MPI_Send(&arrSize, 1, MPI_INT, i, 3, MCW);
+	//		MPI_Send(&permutations[0], arrSize * NUMROTATIONS, MPI_INT, i, 0, MCW);
+	//	}
+	//	auto midTime = chrono::system_clock::now();
+	//	diff = chrono::duration_cast<chrono::milliseconds>(midTime - startTime);
+	//	cout << "Mid time: " << diff.count() << endl;
+	//	int solFound = 0;
+	//	bool morePerms = true;
+	//	int solution[NUMROTATIONS];
+	//	while (!solFound) {
+	//		MPI_Recv(&solFound, 1, MPI_INT, MPI_ANY_SOURCE, 1, MCW, &status);
+	//		if (solFound) {
+	//			MPI_Recv(&solution[0], NUMROTATIONS, MPI_INT, status.MPI_SOURCE, 2, MCW, MPI_STATUS_IGNORE);
+	//			cout << "Sol Permutation: ";
+	//			printSol(solution);
+	//			
+	//			for (int i = 1; i < size; i++) { //Send out stop signal
+	//				int stopSignal = -1;
+	//				MPI_Send(&stopSignal, 1, MPI_INT, i, 4, MCW);
+	//			}
+	//			endTime = chrono::system_clock::now();
+	//			diff = chrono::duration_cast<chrono::milliseconds>(endTime - startTime);
+	//			cout << "Time:" << diff.count() << " milliseconds" << endl;
+	//		}
+	//		else if (morePerms) {
+	//			int permutations[NUMPERMS][NUMROTATIONS];
+	//			int arrSize = NUMPERMS;
+	//			for (int j = 0; j < NUMPERMS; j++) {
+	//				if (next_permutation(numVec.begin(), numVec.end())) {
+	//					for (int k = 0; k < NUMROTATIONS; k++) {
+	//						permutations[j][k] = numVec[k];
+	//					}
+	//				}
+	//				else {
+	//					morePerms = false;
+	//					arrSize = j;
+	//					break;
+	//				}
+	//			}
+	//
+	//			MPI_Send(&arrSize, 1, MPI_INT, status.MPI_SOURCE, 3, MCW);
+	//			MPI_Send(&permutations[0], arrSize * NUMROTATIONS, MPI_INT, status.MPI_SOURCE, 0, MCW);
+	//		}
+	//		else {
+	//			int arrSize = 0;
+	//			MPI_Send(&arrSize, 1, MPI_INT, status.MPI_SOURCE, 3, MCW);
+	//			activeWorkers--;
+	//			if (activeWorkers == 0) { break; }
+	//		}
+	//	}
+	//}
+	//else {
+	//	int solFound = 0;
+	//	ReturnValue retVal;
+	//	int flag;
+	//	int permutations[NUMPERMS][NUMROTATIONS];
+	//	int arrSize;
+	//	while (1) {
+	//		MPI_Iprobe(0, 4, MCW, &flag, &status);
+	//		if (flag) {
+	//			break;
+	//		}
+	//		MPI_Recv(&arrSize, 1, MPI_INT, 0, 3, MCW, MPI_STATUS_IGNORE);
+	//		if (arrSize == 0) {
+	//			break;
+	//		}
+	//		MPI_Recv(&permutations[0], arrSize * NUMROTATIONS, MPI_INT, 0, 0, MCW, MPI_STATUS_IGNORE);
+	//
+	//		retVal = doPermutations(startCube, mixedCube, permutations, arrSize);
+	//		if (retVal.solFound == -1) {
+	//			break;
+	//		}
+	//		MPI_Send(&retVal.solFound, 1, MPI_INT, 0, 1, MCW);
+	//		if (retVal.solFound) {
+	//			cout << "Rank " << rank << " found a solution!" << endl;
+	//			MPI_Send(&permutations[retVal.solPos][0], NUMROTATIONS, MPI_INT, 0, 2, MCW);
+	//			break;
+	//		}
+	//	}
+	//}
+	cout << "rank" << rank << endl;
 	MPI_Finalize();
 	return 0;
 }
