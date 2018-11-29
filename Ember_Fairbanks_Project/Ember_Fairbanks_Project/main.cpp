@@ -56,6 +56,10 @@ void printSol(int sol[NUMALGOS]) {
 		case 5: cout << "b, "; break;
 		case 6: cout << "ri, "; break;
 		case 7: cout << "li, "; break;
+		case 8: cout << "ui, "; break;
+		case 9: cout << "di, "; break;
+		case 10: cout << "fi, "; break;
+		case 11: cout << "bi, "; break;
 		//case 2: cout << "l" << endl; break;
 		//case 3: cout << "li" << endl; break;
 		//case 4: cout << "u" << endl; break;
@@ -71,7 +75,7 @@ void printSol(int sol[NUMALGOS]) {
 	cout << endl;
 }
 
-void doAlgo(vector<vector<int>> &cube, int algoNum) {
+void doRotation(vector<vector<int>> &cube, int algoNum) {
 	switch (algoNum) {
 	case 0: r(cube); break;
 	case 1: l(cube); break;
@@ -81,10 +85,10 @@ void doAlgo(vector<vector<int>> &cube, int algoNum) {
 	case 5: b(cube); break;
 	case 6: ri(cube); break;
 	case 7: li(cube); break;
-	//case 8: ui(cube); break;
-	//case 9: di(cube); break;
-	//case 10: fi(cube); break;
-	//case 11: bi(cube); break;
+	case 8: ui(cube); break;
+	case 9: di(cube); break;
+	case 10: fi(cube); break;
+	case 11: bi(cube); break;
 	}
 }
 
@@ -100,38 +104,57 @@ void setupCube(vector<vector<int>> &cube) {
 	}
 }
 
-void mixCube(vector<vector<int>> &cube) {
-	int numArray[NUMALGOS] = { 0,1,2,3,4,5,6,7 };// , 8, 9, 10, 11
+void mixCube(vector<vector<int>> &cube, int rank) {
+	int numArray[NUMALGOS] = { 0,1,2,3,4, 5, 6, 7 };// , 8, 9, 10, 11};
 	auto eng = default_random_engine(time(NULL));
 	shuffle(begin(numArray), end(numArray), eng);
-	printSol(numArray);
 	for (int i = 0; i < NUMALGOS; i++) {
-		doAlgo(cube, numArray[i]);
+		doRotation(cube, numArray[i]);
 	}
-	cout << endl;
+	if (rank == 0) {
+		printSol(numArray);
+	}
 }
 
-int doPermutations(vector<vector<int>> startCube, vector<vector<int>> mixedCube, int startNum, vector<int> &list) {
+int doPermutations(vector<vector<int>> startCube, vector<vector<int>> mixedCube, int perms[100][NUMALGOS]) {//int startNum, vector<int> &list) {
 	int cnt = 1;
-	do {
+	int flag;
+	int stop;
+	MPI_Status status;
+	//do {
+	//	MPI_Iprobe(0, 4, MCW, &flag, &status);
+	//	if (flag) { 
+	//		MPI_Recv(&stop, 1, MPI_INT, status.MPI_SOURCE, 4, MCW, MPI_STATUS_IGNORE);
+	//		return -1;
+	//	}
+	//
+	//	vector<vector<int>> copy = startCube;
+	//	doRotation(copy, startNum);
+	//	for (int i = 0; i < NUMALGOS - 1; i++) {
+	//		doRotation(copy, list[i]);
+	//	}
+	//	if (copy == mixedCube) {
+	//		cout << "Start Number = " << startNum << ", Permutation " << cnt << endl;
+	//		list.insert(list.begin(), startNum);
+	//		return 1;
+	//	}
+	//	cnt++;
+	//} while (next_permutation(list.begin(), list.end()));
+	for (int i = 0; i < 100; i++) { //perms.size()
+		MPI_Iprobe(0, 4, MCW, &flag, &status);
+		if (flag) {
+			cout << "here" << endl;
+			//MPI_Recv(&stop, 1, MPI_INT, status.MPI_SOURCE, 4, MCW, MPI_STATUS_IGNORE);
+			return -1;
+		}
 		vector<vector<int>> copy = startCube;
-		doAlgo(copy, startNum);
-		for (int i = 0; i < NUMALGOS - 1; i++) {
-			doAlgo(copy, list[i]);
+		for (int j = 0; j < NUMALGOS; j++) {
+			doRotation(copy, perms[i][j]);
 		}
 		if (copy == mixedCube) {
-			cout << "Start Number = " << startNum << ", Permutation " << cnt << endl;
-			for (int i = 0; i < 6; i++) {
-				for (int j = 0; j < 8; j++) {
-					cout << mixedCube[i][j] << ", ";
-				}
-			}
-			cout << endl;
-			list.insert(list.begin(), startNum);
 			return 1;
 		}
-		cnt++;
-	} while (next_permutation(list.begin(), list.end()));
+	}
 	return 0;
 }
 
@@ -141,78 +164,84 @@ int main(int argc, char **argv) {
 	vector<vector<int>> startCube(6);
 	setupCube(startCube);
 	vector<vector<int>> mixedCube = startCube;
-	mixCube(mixedCube);
 	MPI_Status status;
-	MPI_Request request;
 	
 	MPI_Init(&argc, &argv);
 	MPI_Comm_rank(MCW, &rank);
 	MPI_Comm_size(MCW, &size);
+	mixCube(mixedCube, rank);
 
 	if (rank == 0) {
-		cout << "Shuffled Cube" << endl;
-		for (int i = 0; i < 6; i++) {
-			for (int j = 0; j < 8; j++) {
-				cout << mixedCube[i][j] << ", ";
-			}
-		}
-		cout << endl;
-
 		int currentAlgo = 0;
-		for (int i = 1; i < size; i++) { //Send out initial start algorithm
-			MPI_Send(&currentAlgo, 1, MPI_INT, i, 0, MCW);
-			currentAlgo++;
+		vector<int> list = { 0,1,2,3,4, 5, 6, 7, };// 8, 9, 10, 11};
+		for (int i = 1; i < size; i++) { //Send out initial list of permutations
+			int permutations[500][NUMALGOS];
+			for (int j = 0; j < 100; j++) {
+				if (next_permutation(list.begin(), list.end())) {
+					for (int k = 0; k < 5; k++) {
+						permutations[j][k] = list[k];
+					}
+				}
+			}
+			MPI_Send(&permutations[0], 100*NUMALGOS, MPI_INT, i, 0, MCW);
 		}
 		int solFound = 0;
+		bool morePerms = true;
 		int solution[NUMALGOS];
 		while (!solFound) {
 			MPI_Recv(&solFound, 1, MPI_INT, MPI_ANY_SOURCE, 1, MCW, &status);
 			if (solFound) {
 				MPI_Recv(&solution[0], NUMALGOS, MPI_INT, status.MPI_SOURCE, 2, MCW, MPI_STATUS_IGNORE);
 				printSol(solution);
-				//MPI_Bcast(&solFound, 1, MPI_INT, 0, MCW);
+
 				for (int i = 1; i < size; i++) { //Send out stop signal
 					int stopSignal = -1;
-					MPI_Send(&stopSignal, 1, MPI_INT, i, 0, MCW);
+					MPI_Send(&stopSignal, 1, MPI_INT, i, 4, MCW);
+					MPI_Send(&stopSignal, 1, MPI_INT, i, 3, MCW);
 				}
 			}
-			else if(currentAlgo < NUMALGOS) {
-				MPI_Send(&currentAlgo, 1, MPI_INT, status.MPI_SOURCE, 0, MCW);
-				currentAlgo++;
+			else if(morePerms) {
+				int permutations[100][NUMALGOS];
+				for (int j = 0; j < 100; j++) {
+					if (next_permutation(list.begin(), list.end())) {
+						for (int k = 0; k < NUMALGOS; k++) {
+							permutations[j][k] = list[k];
+						}
+					}
+					else {
+						morePerms = false;
+					}
+				}
+				MPI_Send(&permutations[0], 100 * NUMALGOS, MPI_INT, status.MPI_SOURCE, 0, MCW);
 			}
 		}
 	}
 	else {
 		int solFound = 0;
-		int startNum;
+		int stop;
+		int flag;
+		int permutations[100][NUMALGOS];
 		while (1) {
-			vector<int> numList(NUMALGOS);
-			iota(numList.begin(), numList.end(), 0);
-			MPI_Recv(&startNum, 1, MPI_INT, 0, 0, MCW, MPI_STATUS_IGNORE);
-			if (startNum == -1) {
+			MPI_Recv(&permutations[0], 100*NUMALGOS, MPI_INT, 0, 0, MCW, MPI_STATUS_IGNORE);
+
+			solFound = doPermutations(startCube, mixedCube, permutations);
+			if (solFound == -1) {
 				break;
 			}
-
-			numList.erase(remove(numList.begin(), numList.end(), startNum), numList.end());
-			solFound = doPermutations(startCube, mixedCube, startNum, numList);
 			MPI_Send(&solFound, 1, MPI_INT, 0, 1, MCW);
 			if (solFound) {
 				cout << "Rank " << rank << " found a solution!" << endl;
-				MPI_Send(&numList[0], NUMALGOS, MPI_INT, 0, 2, MCW);
+				MPI_Send(&permutations[0][0], NUMALGOS, MPI_INT, 0, 2, MCW); //GET ACTUAL LIST
+				break;
 			}
-			else {
-				cout << "Rank " << rank << " tried with start=" << startNum << endl;
-			}
-			//MPI_Ibcast(&solFound, 1, MPI_INT, 0, MCW, &request);
 		}
 	}
-
 	MPI_Finalize();
 	return 0;
 }
 
 
-void r(vector<vector<int>> &cube) {
+void r(vector<vector<int>> &cube) { //Right
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[white][2] = cube[green][5]; //white side
@@ -232,7 +261,7 @@ void r(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void ri(vector<vector<int>> &cube) {
+void ri(vector<vector<int>> &cube) { //Right-inverted
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[white][2] = cube[blue][2]; //white side
@@ -252,7 +281,7 @@ void ri(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void l(vector<vector<int>> &cube) {
+void l(vector<vector<int>> &cube) { //Left
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[white][0] = cube[blue][0]; //white side
@@ -272,7 +301,7 @@ void l(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void li(vector<vector<int>> &cube) {
+void li(vector<vector<int>> &cube) { //Left-inverted
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[white][0] = cube[green][7]; //white side
@@ -292,7 +321,7 @@ void li(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void u(vector<vector<int>> &cube) {
+void u(vector<vector<int>> &cube) { //Up
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[blue][0] = cube[red][0]; //blue side
@@ -312,7 +341,7 @@ void u(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void ui(vector<vector<int>> &cube) {
+void ui(vector<vector<int>> &cube) { //Up-inverted
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[blue][0] = cube[orange][0]; //blue side
@@ -332,7 +361,7 @@ void ui(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void d(vector<vector<int>> &cube) {
+void d(vector<vector<int>> &cube) { //Down
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[blue][5] = cube[orange][5]; //blue side
@@ -352,7 +381,7 @@ void d(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void di(vector<vector<int>> &cube) {
+void di(vector<vector<int>> &cube) { //Down-inverted
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[blue][5] = cube[red][5]; //blue side
@@ -372,7 +401,7 @@ void di(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void f(vector<vector<int>> &cube) {
+void f(vector<vector<int>> &cube) { //Front
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[white][0] = cube[red][5]; //white side
@@ -392,7 +421,7 @@ void f(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void fi(vector<vector<int>> &cube) {
+void fi(vector<vector<int>> &cube) { //Front-inverted
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[white][0] = cube[orange][2]; //white side
@@ -412,7 +441,7 @@ void fi(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void b(vector<vector<int>> &cube) {
+void b(vector<vector<int>> &cube) { //Back
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[white][5] = cube[orange][0]; //white side
@@ -432,7 +461,7 @@ void b(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void bi(vector<vector<int>> &cube) {
+void bi(vector<vector<int>> &cube) { //Back-inverted
 	vector<vector<int>> tempCube = cube;
 
 	tempCube[white][5] = cube[red][7]; //white side
@@ -452,7 +481,8 @@ void bi(vector<vector<int>> &cube) {
 	cube = tempCube;
 }
 
-void rotateSide(vector<vector<int>> &cube, int side) {
+//Rotate the positions of the cubies on one side clockwise
+void rotateSide(vector<vector<int>> &cube, int side) { 
 	vector<vector<int>> tempCube = cube;
 	tempCube[side][0] = cube[side][5];
 	tempCube[side][1] = cube[side][3];
@@ -465,6 +495,7 @@ void rotateSide(vector<vector<int>> &cube, int side) {
 	cube = tempCube;
 }
 
+//Rotate the positions of the cubies on one side counter-clockwise
 void rotateSideCounter(vector<vector<int>> &cube, int side) {
 	vector<vector<int>> tempCube = cube;
 	tempCube[side][0] = cube[side][2];
