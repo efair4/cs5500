@@ -52,7 +52,7 @@ void printColor(int color) {
 	}
 }
 
-void printSol(int sol[NUMROTATIONS]) {
+void printSol(vector<int> sol) {
 	for (int i = 0; i < NUMROTATIONS; i++) {
 		switch (sol[i]) {
 		case 0: cout << "r, "; break;
@@ -102,10 +102,10 @@ void setupCube(vector<vector<int>> &cube) {
 }
 
 void mixCube(vector<vector<int>> &cube, int rank) {
-	int numArray[NUMROTATIONS] = { 6,5,1,3,0,2,4 };
-	//for (int i = 0; i < NUMROTATIONS; i++) { numArray[i] = i; }
-	//auto eng = default_random_engine(time(NULL));
-	//shuffle(begin(numArray), end(numArray), eng);
+	vector<int> numArray;
+	for (int i = 0; i < NUMROTATIONS; i++) { numArray.push_back(i); }
+	auto eng = default_random_engine(time(NULL));
+	shuffle(numArray.begin(), numArray.end(), eng);
 	for (int i = 0; i < NUMROTATIONS; i++) {
 		doRotation(cube, numArray[i]);
 	}
@@ -140,12 +140,45 @@ ReturnValue doPermutations(vector<vector<int>> startCube, vector<vector<int>> mi
 	return ret;
 }
 
+vector<int> getPermutation(int permNum) {
+	int numCopy = permNum;
+	vector<int> numArray;
+	vector<int> permutation;
+	for (int i = 0; i < NUMROTATIONS; i++) { numArray.push_back(i);	}
+	if (permNum == 0) {
+		return numArray;
+	}
+	int factoradic[NUMROTATIONS];
+	int i = 1;
+	while (permNum != 0) {
+		factoradic[NUMROTATIONS - i] = permNum % i;
+		permNum = permNum / i;
+		i++;
+	}
+	if (i <= NUMROTATIONS) {
+		while (i <= NUMROTATIONS) {
+			factoradic[NUMROTATIONS - i] = 0;
+			i++;
+		}
+	}
+
+	for (int i = 0; i < NUMROTATIONS; i++) {
+		permutation.push_back(numArray[factoradic[i]]);
+		numArray.erase(numArray.begin() + factoradic[i]);
+	}
+	return permutation;
+}
+
+int fact(int n) {
+	return (n == 1 || n == 0) ? 1 : fact(n - 1) * n;
+}
 
 int main(int argc, char **argv) {
 	int rank, size;
 	vector<vector<int>> startCube(6);
 	setupCube(startCube);
 	vector<vector<int>> mixedCube;
+	vector<int> timeVec;
 	MPI_Status status;
 	auto startTime = chrono::system_clock::now();
 	auto endTime = chrono::system_clock::now();
@@ -157,43 +190,52 @@ int main(int argc, char **argv) {
 	if (rank == 0) {
 		cout << "Solving with " << size << " Processes" << endl;
 	}
-	mixedCube = startCube;
-	mixCube(mixedCube, rank);
-
-	vector<int> numVec;
-	for (int i = 0; i < NUMROTATIONS; i++) { numVec.push_back(i); }
-	int flag;
-	vector<vector<int>> copy;
-	while (1) {
-		MPI_Iprobe(MPI_ANY_SOURCE, 0, MCW, &flag, &status);
-		if (flag) {
-			break;
+	
+	for (int iter = 0; iter < 10; iter++) {
+		mixedCube = startCube;
+		mixCube(mixedCube, rank);
+		if (rank == 0) {
+			startTime = chrono::system_clock::now();
 		}
-		cout << "here" << endl;
-		for (int i = 0; i < size; i++) {
-			if ((next_permutation(numVec.begin(), numVec.end())) && (i-rank == 0)) {
-				cout << rank << ": " << i << endl;
-				copy = startCube;
-				for (int j = 0; j < NUMROTATIONS; j++) {
-					cout << numVec[j] << ", ";
-					doRotation(copy, numVec[j]);
-				}
-				cout << endl;
-				if (copy == mixedCube) {
-					cout << "Rank " << rank << " found a solution!" << endl;
-					for (int k = 0; k < NUMROTATIONS; k++) {
-						cout<<numVec[k]<<", ";
-					}
-					cout << endl;
-					int stop = -1;
-					for (int s = 0; s < size; s++) {
+		vector<int> numVec;
+		for (int i = 0; i < NUMROTATIONS; i++) { numVec.push_back(i); }
+		int flag;
+		int outerStop;
+		int permNum = rank;
+		bool cont = true;
+		vector<vector<int>> copy;
+		while (permNum < fact(NUMROTATIONS)) {
+			MPI_Iprobe(MPI_ANY_SOURCE, 0, MCW, &flag, &status);
+			if (flag) {
+				MPI_Recv(&outerStop, 1, MPI_INT, status.MPI_SOURCE, 0, MCW, MPI_STATUS_IGNORE);
+				break;
+			}
+			numVec = getPermutation(permNum);
+			copy = startCube;
+			for (int j = 0; j < NUMROTATIONS; j++) {
+				doRotation(copy, numVec[j]);
+			}
+			if (copy == mixedCube) {
+				cout << "Rank " << rank << " found a solution!" << endl;
+				printSol(numVec);
+				int stop = -1;
+				for (int s = 0; s < size; s++) {
+					if (s != rank) {
 						MPI_Send(&stop, 1, MPI_INT, s, 0, MCW);
 					}
 				}
+				cont = false;
+				break;
 			}
+			permNum += size;
+		}
+		if (rank == 0) {
+			endTime = chrono::system_clock::now();
+			diff = chrono::duration_cast<chrono::milliseconds>(endTime - startTime);
+			timeVec.push_back(diff.count());
+			cout << "Time: " << diff.count() << endl << endl;
 		}
 	}
-
 
 	//int activeWorkers = size - 1;
 	//if (rank == 0) {
@@ -294,7 +336,13 @@ int main(int argc, char **argv) {
 	//		}
 	//	}
 	//}
-	cout << "rank" << rank << endl;
+	if (rank == 0) {
+		int totalTime = 0;
+		for (int i = 0; i < timeVec.size(); i++) {
+			totalTime += timeVec[i];
+		}
+		cout << "Average time: " << static_cast<double>(totalTime) / timeVec.size() << endl;
+	}
 	MPI_Finalize();
 	return 0;
 }
